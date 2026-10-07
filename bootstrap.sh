@@ -132,13 +132,17 @@ tty_say ""
 tty_say "==================== 完成 ===================="
 tty_say "Tailscale：${ts_name:-未加入} ${ts_ip}"
 [ -n "$FAILED" ] && tty_say "有问题的步骤：${FAILED}（见上方 [FAIL]，修好后可以直接重跑本脚本，已完成的会自动跳过）"
-tty_say "巡检里「console 自动登录」「UU 在运行」两项，要等重启并远程配好 UU 之后才会通过，现在 FAIL 属正常"
+[ "$FILEVAULT_PLAN" = "A" ] && tty_say "巡检里「console 自动登录」「UU 在运行」两项，要等重启并远程配好 UU 之后才会通过，现在 FAIL 属正常"
 if [ "$NEW_CONSOLE" = "1" ]; then
 	tty_say ""
 	tty_say "console 账号密码（只显示这一次，请立刻存进密码管理器）：$CONSOLE_PASSWORD"
 fi
 tty_say ""
 tty_say "现场的工作到此结束。接下来由管理员远程完成 UU："
-tty_say "  1. 在管理员电脑上：open vnc://${ts_name%.}  （以 console 和上面的密码登录屏幕共享）"
+if [ "$NEW_CONSOLE" = "1" ]; then
+	tty_say "  1. 在管理员电脑上：open vnc://${ts_name%.}  （以 console 和上面的密码登录屏幕共享）"
+else
+	tty_say "  1. 在管理员电脑上：open vnc://${ts_name%.}  （以 console 登录屏幕共享；console 是之前建的，用当时保存的密码）"
+fi
 tty_say "  2. 打开 UU 远程 → 登录 UU 账号 → 授权「屏幕与系统音频录制」「辅助功能」→ 设置中心勾选「开机自动启动」「防止电脑休眠」"
 tty_say "=============================================="
