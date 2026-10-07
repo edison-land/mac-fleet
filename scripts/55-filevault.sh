@@ -39,7 +39,7 @@ if [ "$FILEVAULT_PLAN" = "A" ]; then
 		fi
 	fi
 	[ "$MODE" = "apply" ] && info "现在：$(fv_status)"
-	todo "FileVault 关闭后运行：sudo bash scripts/50-console-uu.sh --apply --plan=A"
+	todo "FileVault 关闭后运行：sudo bash scripts/50-uu.sh --apply --plan=A"
 else
 	if fv_is_on; then
 		pass "方案 B：FileVault 已开启"
@@ -54,7 +54,7 @@ else
 		fi
 	fi
 	[ "$MODE" = "apply" ] && info "现在：$(fv_status)"
-	[ -n "$(autologin_user)" ] && todo "方案 B 不应自动登录：运行 sudo bash scripts/50-console-uu.sh --apply --plan=B"
+	[ -n "$(autologin_user)" ] && todo "方案 B 不应自动登录：运行 sudo bash scripts/50-uu.sh --apply --plan=B"
 fi
 
 summary

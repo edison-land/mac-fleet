@@ -42,14 +42,14 @@ info "本次开机：$(date -r "$boot" '+%Y-%m-%d %H:%M:%S')，已运行 ${up}s"
 cuser="$(console_user)"
 rec console_user "$cuser"
 info "当前控制台用户：$cuser"
-uu_console_delay=""
+uu_admin_delay=""
 while read -r pid u secs; do
 	[ -z "$pid" ] && continue
 	d=$((up - secs))
 	info "UU pid=$pid 用户=$u 在开机后第 ${d}s 启动"
-	[ "$u" = "$CONSOLE_USER" ] && uu_console_delay="$d"
+	[ "$u" = "$ADMIN_USER" ] && uu_admin_delay="$d"
 done <<<"$(uu_procs)"
-rec uu_console_start_after_boot_sec "$uu_console_delay"
+rec uu_admin_start_after_boot_sec "$uu_admin_delay"
 
 step "电源"
 while IFS=: read -r k w _; do
@@ -65,8 +65,10 @@ rec filevault "$fv"
 rec autologin "$al"
 if [ "$FILEVAULT_PLAN" = "A" ]; then
 	fv_is_off && pass "FileVault 已关闭" || fail "方案 A 要求 FileVault 关闭：$fv"
-	[ "$al" = "$CONSOLE_USER" ] && pass "自动登录 $CONSOLE_USER" || fail "自动登录应为 ${CONSOLE_USER}，当前：${al:-无}"
-	[ "$cuser" = "$CONSOLE_USER" ] && pass "开机后控制台是 $CONSOLE_USER" || warn "当前控制台用户是 ${cuser}（重启后应为 ${CONSOLE_USER}）"
+	[ "$al" = "$ADMIN_USER" ] && pass "自动登录 $ADMIN_USER" || fail "自动登录应为 ${ADMIN_USER}，当前：${al:-无}"
+	sl="$(sudo -n -u "$ADMIN_USER" sysadminctl -screenLock status 2>&1 | sed -n 's/.*screenLock delay is \(.*\)$/\1/p')"
+	rec screenlock "$sl"
+	case "$sl" in *immediate* | "0 seconds") pass "显示器关闭后立即锁屏" ;; "") info "锁屏状态需 sudo 运行本脚本才能读取" ;; *) fail "锁屏延迟为 ${sl}，自动登录时应立即锁屏（运行 50-uu --apply）" ;; esac
 else
 	fv_is_on && pass "FileVault 已开启" || fail "方案 B 要求 FileVault 开启：$fv"
 	[ -z "$al" ] && pass "未设置自动登录" || fail "方案 B 不应自动登录，当前：$al"
@@ -76,7 +78,7 @@ step "管理员家目录（不修改，只检查远程用户能否读到）"
 am="$(home_mode "$ADMIN_USER")"
 rec admin_home_mode "$am"
 info "$(user_home "$ADMIN_USER") 权限 ${am}（保持原样）"
-for u in "$CONSOLE_USER" $(managed_users); do
+for u in $(managed_users); do
 	user_exists "$u" || continue
 	if dsmemberutil checkmembership -U "$u" -G staff 2>/dev/null | grep -q "is a member"; then
 		case "$am" in 7[0-7]0 | 700) fail "$u 在 staff 组，能读管理员家目录里组可读的内容（运行 20-accounts --apply）" ;; *) fail "$u 在 staff 组" ;; esac
@@ -86,7 +88,8 @@ for u in "$CONSOLE_USER" $(managed_users); do
 done
 
 step "账号"
-for u in "$CONSOLE_USER" $(managed_users); do
+[ -z "$(managed_users)" ] && info "没有配置远程用户（MANAGED_USERS 为空）"
+for u in $(managed_users); do
 	if ! user_exists "$u"; then fail "$u 不存在"; continue; fi
 	is_admin "$u" && fail "$u 是管理员" || pass "$u 是标准用户"
 	m="$(home_mode "$u")"
@@ -119,15 +122,14 @@ if [ -f "$SSHD_DROPIN" ]; then pass "sshd 加固片段存在"; else fail "缺少
 
 step "UU"
 [ -d "$UU_APP" ] && pass "UU 已安装" || fail "UU 未安装"
-wd="$(user_home "$CONSOLE_USER")/Library/LaunchAgents/${WATCHDOG_LABEL}.plist"
-# console 家目录是 700，管理员不加 sudo 读不到；读不到时如实报告
-if [ -f "$wd" ]; then pass "守护任务已安装"; elif [ -r "$(user_home "$CONSOLE_USER")" ]; then fail "缺少守护任务 $wd"; else warn "无权读取 console 家目录，跳过守护任务检查（用 sudo 运行可检查）"; fi
-if [ -n "$uu_console_delay" ]; then
-	pass "console 的 UU 在运行（开机后 ${uu_console_delay}s 启动）"
+wd="$(user_home "$ADMIN_USER")/Library/LaunchAgents/${WATCHDOG_LABEL}.plist"
+if [ -f "$wd" ]; then pass "守护任务已安装"; else fail "缺少守护任务 $wd"; fi
+if [ -n "$uu_admin_delay" ]; then
+	pass "$ADMIN_USER 的 UU 在运行（开机后 ${uu_admin_delay}s 启动）"
 elif [ "$FILEVAULT_PLAN" = "A" ]; then
-	fail "console 的 UU 没有在运行"
+	fail "$ADMIN_USER 的 UU 没有在运行"
 else
-	info "方案 B 不自动登录，console 的 UU 未运行属正常"
+	info "方案 B 不自动登录，管理员登录后 UU 才会运行"
 fi
 
 step "Tailscale"

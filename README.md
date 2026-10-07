@@ -22,9 +22,9 @@ sudo bash scripts/10-power.sh --apply           # 确认后执行
 |---|---|---|
 | `00-preflight` | 机型/系统/网络/UU 预检，记录当前设置 | — |
 | `10-power` | 断电后自动开机、接通电源时开机、主机不睡眠；`--probe` 探测系统设置对应的 pmset 键 | 系统设置中确认 |
-| `20-accounts` | 创建 console 与远程用户（标准账号），关闭访客，家目录 700 | `PASSWORD_MODE`：shared 只输一次；generate 零输入、随机密码在终端显示一次；prompt 逐个输入 |
+| `20-accounts` | 创建远程用户（标准账号，主组 fleetusers），关闭访客，家目录 700 | `PASSWORD_MODE`：shared 只输一次；generate 零输入、随机密码在终端显示一次；prompt 逐个输入 |
 | `30-remote-access` | SSH、屏幕共享，「仅这些用户」访问组，sshd 加固，管理员公钥 | 命令开不了时在系统设置中手动打开 |
-| `50-console-uu` | UU 守护任务；方案 A 自动登录 console / 方案 B 关闭自动登录 | 在 console 里登录 UU、授权 |
+| `50-uu` | UU 装在管理员账号；方案 A 自动登录管理员 + 显示器关闭即锁屏 / 方案 B 不自动登录 | 在管理员桌面里登录 UU、授权 |
 | `55-filevault` | 按方案关闭（A）或开启（B）FileVault | 输入密码、保存恢复密钥 |
 | `60-hardening` | 主机名、关闭自动安装 macOS 更新、防火墙 | 系统设置中确认 |
 | `90-verify` | 只读巡检，逐项 PASS/FAIL，输出 JSON | — |

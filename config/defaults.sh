@@ -10,19 +10,17 @@ fi
 MIN_MACOS="${MIN_MACOS:-26.5}"
 MIN_CHIP_GEN="${MIN_CHIP_GEN:-4}"
 
-FILEVAULT_PLAN="${FILEVAULT_PLAN:-A}"            # A＝关闭 FileVault + 自动登录 console（无人值守）；B＝保留
+FILEVAULT_PLAN="${FILEVAULT_PLAN:-A}"            # A＝关闭 FileVault + 自动登录管理员 + 显示器关闭即锁屏（UU 断电后自动上线）；B＝保留 FileVault、不自动登录
 
 ADMIN_USER="${ADMIN_USER:-}"                     # 空＝运行 sudo 的账号
 ADMIN_PUBKEY="${ADMIN_PUBKEY:-}"                 # 空＝不写公钥
 HARDEN_ADMIN_HOME="${HARDEN_ADMIN_HOME:-0}"      # 不动管理员家目录
 FLEET_GROUP="${FLEET_GROUP:-fleetusers}"         # 远程用户的主组（不是 staff）
-CONSOLE_USER="${CONSOLE_USER:-console}"
-CONSOLE_FULLNAME="${CONSOLE_FULLNAME:-Console}"
 MANAGED_USERS="${MANAGED_USERS:-}"               # 远程用户；开户时再传，如 MANAGED_USERS="u_alice"
 PASSWORD_MODE="${PASSWORD_MODE:-generate}"
 
 SSH_EXTRA_USERS="${SSH_EXTRA_USERS:-}"           # 系统 SSH 只给管理员做局域网救援；用户走 Tailscale SSH
-SCREEN_SHARE_USERS="${SCREEN_SHARE_USERS:-console}"  # 管理员经 Tailscale 屏幕共享登录 console 配置 UU
+SCREEN_SHARE_USERS="${SCREEN_SHARE_USERS:-}"     # 除管理员外允许屏幕共享的账号（管理员默认允许，用作图形救援入口）
 SCREEN_INCLUDE_ADMIN="${SCREEN_INCLUDE_ADMIN:-1}"
 SSH_KEY_ONLY="${SSH_KEY_ONLY:-0}"
 

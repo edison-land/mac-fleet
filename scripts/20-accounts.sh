@@ -1,5 +1,5 @@
 #!/bin/bash
-# 20 账号：创建 console 与远程用户（都是标准账号）、关闭访客、收紧家目录权限。
+# 20 账号：创建远程用户（标准账号，主组 fleetusers）、关闭访客、收紧家目录权限。
 # 用法：bash scripts/20-accounts.sh  →  sudo bash scripts/20-accounts.sh --apply
 #
 # 新账号的密码由配置 PASSWORD_MODE 决定：
@@ -38,13 +38,6 @@ read_shared_password() {
 
 create_user() {
 	local u="$1" full="$2" pw
-	# bootstrap 会事先生成 console 的密码（后面设置自动登录要用），这里直接用，不再交互
-	if [ "$u" = "$CONSOLE_USER" ] && [ -n "${CONSOLE_PASSWORD:-}" ]; then
-		sysadminctl -addUser "$u" -fullName "$full" -GID "$FLEET_GID_RESOLVED" -password "$CONSOLE_PASSWORD" 2>&1 | grep -v -E -- '-{10,}|clear text password'
-		user_exists "$u" || return 1
-		createhomedir -c -u "$u" >/dev/null 2>&1
-		return 0
-	fi
 	case "$PASSWORD_MODE" in
 	prompt)
 		echo "  为 $u 设置密码（输入时不显示）："
@@ -108,13 +101,14 @@ fi
 
 step "账号"
 to_create=""
-for u in "$CONSOLE_USER" $(managed_users); do user_exists "$u" || to_create="$to_create $u"; done
+for u in $(managed_users); do user_exists "$u" || to_create="$to_create $u"; done
 if [ -n "$to_create" ]; then
 	info "密码方式：PASSWORD_MODE=${PASSWORD_MODE}（待创建：${to_create# }）"
 	[ "$MODE" = "apply" ] && [ "$PASSWORD_MODE" = "shared" ] && read_shared_password
 fi
-for u in "$CONSOLE_USER" $(managed_users); do
-	if [ "$u" = "$CONSOLE_USER" ]; then full="$CONSOLE_FULLNAME"; else full="$u"; fi
+[ -z "$(managed_users)" ] && info "MANAGED_USERS 为空：本次不创建远程用户（开户时再传，如 MANAGED_USERS=u_alice）"
+for u in $(managed_users); do
+	full="$u"
 	if user_exists "$u"; then
 		pass "$u 已存在（uid $(user_uid "$u")）"
 	else
@@ -153,7 +147,7 @@ else
 fi
 
 step "家目录权限"
-targets="$CONSOLE_USER $(managed_users)"
+targets="$(managed_users)"
 [ "${HARDEN_ADMIN_HOME:-0}" = "1" ] && targets="$targets $ADMIN_USER"
 for u in $targets; do
 	if ! user_exists "$u"; then

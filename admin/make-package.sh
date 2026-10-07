@@ -54,6 +54,6 @@ cat <<MSG
 1. 把附件 mac-fleet-$HOST.zip 保存到「下载」文件夹
 2. 打开「终端」，粘贴下面这一行后回车，按提示输入这台 Mac 的开机密码，再输入 yes：
 cd ~/Downloads && ditto -x -k mac-fleet-$HOST.zip . && cd mac-fleet && sudo bash bootstrap.sh
-3. 最后屏幕上会显示一行「console 账号密码」，把它截图发给我
+3. 执行完把屏幕截图发给我
 —————————————————————
 MSG

@@ -25,7 +25,7 @@ fi
 # 预演：bash bootstrap.sh --check（不用 sudo，不做任何修改，逐步打印将要做的事）
 if [ "${1:-}" = "--check" ]; then
 	cd "$SRC" || exit 2
-	for s in 00-preflight 55-filevault 10-power 20-accounts 30-remote-access 40-tailscale 60-hardening 50-console-uu; do
+	for s in 00-preflight 55-filevault 10-power 20-accounts 30-remote-access 40-tailscale 60-hardening 50-uu; do
 		printf '\n######## %s（预演）########\n' "$s"
 		bash "scripts/$s.sh" 2>&1 | grep -E '^(\[(PLAN|FAIL|WARN)\]|== 汇总)'
 	done
@@ -68,10 +68,10 @@ tty_say "主机名：${HOST_NAME}（Tailscale 中显示为 ${TS_HOSTNAME}）"
 tty_say "管理员：$SUDO_USER"
 tty_say "FileVault 方案：${FILEVAULT_PLAN}（当前：${fv_now}）"
 if [ "$FILEVAULT_PLAN" = "A" ]; then
-	tty_say "  → 会关闭 FileVault，开机自动登录空的标准账号 console，断电恢复后 UU 与 Tailscale 全自动上线"
+	tty_say "  → 会关闭 FileVault，开机自动登录管理员 ${SUDO_USER}（显示器关闭后立即锁屏），断电恢复后 UU 与 Tailscale 全自动上线"
 fi
 tty_say "Tailscale：$([ -n "${TS_AUTHKEY:-}" ] && echo "使用传入的认证密钥加入" || echo "没有传入密钥，加入时会显示二维码，需用管理员账号扫码批准")"
-tty_say "将依次执行：预检 → FileVault → 电源 → 账号 → 系统 SSH/屏幕共享 → Tailscale → 加固 → console 与 UU → 巡检"
+tty_say "将依次执行：预检 → FileVault → 电源 → 账号 → 系统 SSH/屏幕共享 → Tailscale → 加固 → UU 与自动登录 → 巡检"
 tty_say "====================================================="
 if [ "${BOOTSTRAP_YES:-0}" != "1" ]; then
 	printf '输入 yes 开始：' >/dev/tty
@@ -86,13 +86,17 @@ if [ -z "${TS_AUTHKEY:-}" ]; then
 	printf '\n' >/dev/tty
 fi
 
-# console 的密码：由这里生成，账号创建和自动登录都用它，结束时显示一次（不进日志）
-if ! dscl . -read /Users/"$CONSOLE_USER" UniqueID >/dev/null 2>&1; then
-	CONSOLE_PASSWORD="$(LC_ALL=C tr -dc 'A-HJ-NP-Za-km-z2-9' </dev/urandom | head -c 20)"
-	export CONSOLE_PASSWORD
-	NEW_CONSOLE=1
-else
-	NEW_CONSOLE=0
+# 方案 A 要用管理员密码写入自动登录凭据、开启锁屏：只在这里问一次，校验通过后传给后面的步骤（不进日志）
+if [ "$FILEVAULT_PLAN" = "A" ] && [ -z "${ADMIN_PASSWORD:-}" ]; then
+	while :; do
+		printf '输入管理员 %s 的登录密码（用于开机自动登录和锁屏，输入时不显示）：' "$SUDO_USER" >/dev/tty
+		read -rs ADMIN_PASSWORD </dev/tty
+		printf '
+' >/dev/tty
+		dscl . -authonly "$SUDO_USER" "$ADMIN_PASSWORD" >/dev/null 2>&1 && break
+		tty_say "密码不对，重新输入"
+	done
+	export ADMIN_PASSWORD
 fi
 export TS_AUTHKEY="${TS_AUTHKEY:-}"
 
@@ -117,9 +121,9 @@ run 20-accounts --apply --yes
 run 30-remote-access --apply --yes
 run 40-tailscale --apply --yes
 run 60-hardening --apply --yes
-run 50-console-uu --apply --yes
+run 50-uu --apply --yes
 printf '\n\n######## 90-verify ########\n'
-bash scripts/90-verify.sh   # 巡检结果不计入失败：console 自动登录、UU 在线要等重启和远程配置 UU 之后才会 PASS
+bash scripts/90-verify.sh   # 巡检结果不计入失败：UU 在线要等 UU 登录、授权之后才会 PASS
 
 # 认证密钥是一次性的，用过就删掉包里的副本
 [ -f "$SITE_ENV" ] && rm -f "$SITE_ENV"
@@ -132,17 +136,10 @@ tty_say ""
 tty_say "==================== 完成 ===================="
 tty_say "Tailscale：${ts_name:-未加入} ${ts_ip}"
 [ -n "$FAILED" ] && tty_say "有问题的步骤：${FAILED}（见上方 [FAIL]，修好后可以直接重跑本脚本，已完成的会自动跳过）"
-[ "$FILEVAULT_PLAN" = "A" ] && tty_say "巡检里「console 自动登录」「UU 在运行」两项，要等重启并远程配好 UU 之后才会通过，现在 FAIL 属正常"
-if [ "$NEW_CONSOLE" = "1" ]; then
-	tty_say ""
-	tty_say "console 账号密码（只显示这一次，请立刻存进密码管理器）：$CONSOLE_PASSWORD"
-fi
+[ "$FILEVAULT_PLAN" = "A" ] && tty_say "巡检里「UU 在运行」要等 UU 登录并授权之后才会通过，现在 FAIL 属正常"
 tty_say ""
-tty_say "现场的工作到此结束。接下来由管理员远程完成 UU："
-if [ "$NEW_CONSOLE" = "1" ]; then
-	tty_say "  1. 在管理员电脑上：open vnc://${ts_name%.}  （以 console 和上面的密码登录屏幕共享）"
-else
-	tty_say "  1. 在管理员电脑上：open vnc://${ts_name%.}  （以 console 登录屏幕共享；console 是之前建的，用当时保存的密码）"
-fi
-tty_say "  2. 打开 UU 远程 → 登录 UU 账号 → 授权「屏幕与系统音频录制」「辅助功能」→ 设置中心勾选「开机自动启动」「防止电脑休眠」"
+tty_say "现场的工作到此结束。接下来由管理员远程完成 UU（只做一次）："
+tty_say "  1. 在管理员电脑上：open vnc://${ts_name%.}  （以 ${SUDO_USER} 登录屏幕共享）"
+tty_say "  2. 打开 UU 远程 → 登录 UU 账号 → 授权「屏幕与系统音频录制」「辅助功能」并重启 UU → 设置中心勾选「开机自动启动」「防止电脑休眠」"
+[ "$FILEVAULT_PLAN" = "A" ] && tty_say "  3. 手机 UU → 安全：开启「自动解锁被控端」（录入 ${SUDO_USER} 的密码），锁屏时也能远程进入"
 tty_say "=============================================="

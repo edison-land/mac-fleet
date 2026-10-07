@@ -32,7 +32,7 @@ restore_fw_off() { /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalst
 
 remove_watchdog() {
 	local uid
-	uid="$(user_uid "$CONSOLE_USER")"
+	uid="$(user_uid "$ADMIN_USER")"
 	launchctl bootout "gui/$uid/$WATCHDOG_LABEL" 2>/dev/null
 	rm -f "$1"
 }
@@ -55,12 +55,14 @@ else
 fi
 
 step "UU 守护任务"
-if user_exists "$CONSOLE_USER"; then
-	wd="$(user_home "$CONSOLE_USER")/Library/LaunchAgents/${WATCHDOG_LABEL}.plist"
-	if [ -f "$wd" ] || [ "$MODE" = "check" ]; then change "移除 $wd" remove_watchdog "$wd"; fi
+wd="$(user_home "$ADMIN_USER")/Library/LaunchAgents/${WATCHDOG_LABEL}.plist"
+if [ -f "$wd" ]; then
+	change "移除 $wd" remove_watchdog "$wd"
 else
-	pass "${CONSOLE_USER} 不存在，无需处理"
+	pass "守护任务不存在，无需处理"
 fi
+# 以前版本把守护任务装在 console 账号里；如果还有 console 账号，提示可删除
+user_exists console && info "还有旧版留下的 console 账号；确认不再需要可执行：sudo sysadminctl -deleteUser console"
 
 step "sshd 加固片段"
 if [ "$BK_SSHD_DROPIN" = "0" ] && [ -f "$SSHD_DROPIN" ]; then
@@ -140,7 +142,7 @@ else
 fi
 
 step "本工具新建的账号"
-for u in "$CONSOLE_USER" $(managed_users); do
+for u in $(managed_users); do
 	user_exists "$u" || continue
 	if in_list "$u" "$BK_USERS"; then
 		info "$u 在备份时已存在，不删除"

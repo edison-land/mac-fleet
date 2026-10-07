@@ -50,7 +50,7 @@ ACCOUNTS=" "
 while read -r login acct hosts; do
 	[ -z "${login:-}" ] && continue
 	case "$login" in *@*) ;; *) bad "「${login}」不像 Tailscale 登录名（应形如 alice@github）" ;; esac
-	case "$acct" in u_*) ;; *) bad "${login} 的本地账号「${acct}」必须以 u_ 开头（避免和 console、管理员等系统账号冲突）" ;; esac
+	case "$acct" in u_*) ;; *) bad "${login} 的本地账号「${acct}」必须以 u_ 开头（避免和管理员等系统账号冲突）" ;; esac
 	case "$acct" in *[!a-z0-9_]*) bad "本地账号「${acct}」只能用小写字母、数字和下划线" ;; esac
 	case "$LOGINS" in *" $login "*) bad "用户 $login 出现了不止一行（一个人只写一行，多台机器写在同一行）" ;; esac
 	case "$ACCOUNTS" in *" $acct "*) bad "本地账号 $acct 被不止一个人使用（一个账号只能属于一个人）" ;; esac
