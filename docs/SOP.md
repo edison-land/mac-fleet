@@ -1,0 +1,124 @@
+# mac-fleet 接入 SOP：UU 远程 + Tailscale SSH
+
+三个角色，各做各的：
+
+| 角色 | 做什么 | 交互次数 |
+|---|---|---|
+| **管理员** | 一次性建网络和规则；每加一台机器、一个用户时改几行规则 | 网页后台操作 |
+| **服务端现场**（放 Mac mini 的人） | 执行一条命令 | 输入 sudo 密码；FileVault 开着时，再输一次管理员账号和密码 |
+| **客户端**（用户） | 执行一条命令 | 首次：输入电脑密码、允许两个系统弹窗、浏览器登录一次 |
+
+UU 远程只给管理员用，作为图形救援入口；用户统一走 Tailscale SSH，各自只能登录分配给自己的账号。
+
+---
+
+## 一、管理员：一次性准备
+
+1. 在 login.tailscale.com 用 GitHub 或微软账号创建私有网络，记下网络名（形如 `xxx.github`）。
+2. 管理员自己的电脑执行一次客户端脚本（第四节），加入网络。**管理员在网络里没有任何设备时，规则不会下发。**
+3. 后台「Settings → Keys → Generate access token」生成 API 令牌（免费版可用，最长 90 天），存进本机钥匙串：
+   ```sh
+   bash admin/push-policy.sh --save-token
+   ```
+4. 以后**不在后台手写访问规则**，只维护两张表，然后同步：
+   - `admin/hosts.conf`：机器清单。机器名 = Tailscale 名字 = 标签 `tag:<机器名>`。
+   - `admin/users.conf`：一行一个人：「Tailscale 登录名　本地账号（u_ 开头）　可访问的机器…」。支持多对多：一个人可以有多台机器，一台机器可以分给多个人；每个人在所有机器上都只有这一个账号。
+   ```sh
+   bash admin/sync.sh                       # 只读：校验两张表，生成规则，打印谁能连哪台
+   bash admin/sync.sh --accounts --push     # 在各台机器上补建账号 + 推送规则到后台 + 给机器补标签
+   ```
+   推送前会先让后台校验规则、备份后台现有规则、显示差异，你输入 yes 才会真正推送。
+
+## 二、服务端：加一台 Mac mini
+
+**管理员先做（约 2 分钟）**
+
+1. 给这台机器起名，比如 `mm-us-01`。这是**机器名**，不是用户名：它会成为 Mac 的电脑名、在 Tailscale 里的名字，用户连接时也用它（`ssh u_alice@mm-us-01`）。
+2. 在 `admin/hosts.conf` 加一行「`mm-us-01  <这台机器的管理员账号>`」，运行 `bash admin/sync.sh --push`，这样后台才会有 `tag:mm-us-01`。
+3. 「Settings → Keys → Generate auth key」：不勾选 Reusable，有效期 1 天，Tags 选 `tag:mac` 和 `tag:mm-us-01`，生成后复制。这个密钥决定了机器**加入你的网络**，可以理解成一张一次性的入网门票。
+4. 在管理员电脑上生成这台机器的专属部署包，按提示粘贴密钥：
+   ```sh
+   bash admin/make-package.sh mm-us-01
+   ```
+   会得到 `dist/mac-fleet-mm-us-01.zip`（主机名和密钥已经放在包里），同时打印一段可以直接转发给现场的说明。
+5. **私聊**把压缩包和那段说明发给现场的人。包里有密钥，但只能用一次、1 天后失效。
+
+**现场的人在 Mac mini 上做（管理员账号里）**
+
+把压缩包保存到「下载」文件夹，打开「终端」，执行这一条：
+
+```sh
+cd ~/Downloads && ditto -x -k mac-fleet-mm-us-01.zip . && cd mac-fleet && sudo bash bootstrap.sh
+```
+
+- 输入这台 Mac 的开机密码，看完开头列出的计划后输入 `yes`。如果 FileVault 开着，还会再要求输入一次管理员账号和密码。
+- 前提：已经装了 Homebrew。没装的话，脚本会打印安装命令后退出，装完重新运行即可。
+- 默认用**方案 A**：关闭 FileVault，开机自动登录空的标准账号 `console`。服务端**只会创建这一个账号**，用户的账号由管理员另外开（第三节）。
+- 结束时会显示 **console 账号密码（只显示一次）**，现场的人截图发给管理员。包里的认证密钥会被自动删除。
+- 如果用的是通用包（不带密钥），执行时会提示粘贴密钥；直接回车则改为扫码登录。想先看看会做什么、不实际修改，可以执行 `bash bootstrap.sh --check`。
+
+**管理员远程完成 UU（现场不用管）**
+
+```sh
+open vnc://mm-us-01      # 以 console 和上面那个密码登录屏幕共享
+```
+
+在 console 的桌面里：
+1. 打开 UU 远程，登录 UU 账号。
+2. 系统设置 → 隐私与安全性：在「屏幕与系统音频录制」「辅助功能」里打开 UU 远程。
+3. UU → 设置中心：勾选「开机自动启动」和「防止电脑休眠」。
+
+最后验证：`sudo shutdown -r now` 重启后，UU 设备列表里这台机器自动上线，`ssh <管理员>@mm-us-01` 也能连上。
+
+---
+
+## 三、加一个用户 / 给用户加机器
+
+1. **邀请**（只有新用户需要）：「Users → Invite users」生成邀请链接发给用户。用户接受后，在「Users」里点 **Approve** 批准。
+2. **改分配表**：在 `admin/users.conf` 里加一行，或者在他那一行后面追加机器名：
+   ```
+   alice@github   u_alice   mm-us-01 mm-au-01
+   ```
+3. **同步**：
+   ```sh
+   bash admin/sync.sh --accounts --push
+   ```
+   - `--accounts`：经 Tailscale SSH 到他被分配的每台机器，没有 `u_alice` 就创建（会要求输入该机器管理员的 sudo 密码）。新账号是标准用户，主组是 `fleetusers`，读不到管理员和其他用户的家目录。
+   - `--push`：更新规则，alice 只能以 `u_alice` 登录分配给她的机器。
+4. 把**网络名、`u_alice@mm-us-01`、客户端脚本**发给用户。
+
+收回权限：从 `users.conf` 里删掉这个人或某台机器，再运行 `--push` 同步。机器上的账号**不会自动删除**，同步时会提醒你手动处理。
+
+## 四、客户端：用户接入（macOS）
+
+```sh
+bash connect-mac.sh <网络名> u_alice@mm-us-01
+```
+
+脚本会依次：
+1. 安装 Tailscale；
+2. 检查有没有代理冲突；
+3. 提示用户登录，并等待登录完成；
+4. 列出可以连接的 Mac，并测试一次 SSH。
+
+全部通过后，以后直接执行 `ssh u_alice@mm-us-01` 就能登录。不需要密码，也不需要 SSH 密钥。
+
+第一次接入需要用户手动做的：
+- 输入电脑密码；
+- 允许「添加 VPN 配置」和「网络扩展」两个系统弹窗；
+- 在浏览器里打开邀请链接并登录，再在 Tailscale 窗口里点 Sign in。**如果出现选择网络的页面，一定要选管理员的网络**；选错的话，会自动建一个以自己邮箱命名的空网络。
+
+Windows / iPhone / Android：从 tailscale.com/download 下载客户端，登录方式一样；SSH 用系统自带的 `ssh` 命令或 Termius。大陆的中国区 App Store 一般搜不到 Tailscale。
+
+---
+
+## 五、常见问题
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 加入网络时卡住、不出二维码 / 登录不成功 | 代理软件（Clash 等）的 Fake-IP 把 Tailscale 服务器解析成 198.18.x 假地址 | ① 代理软件 DNS → Fake-IP 过滤：`+.tailscale.com` `+.tailscale.io` `+.ts.net`；② 客户端另外要做：TUN 排除 `100.64.0.0/10`，规则里把 `tailscale.com`、`ts.net`、`100.64.0.0/10` 设为直连 |
+| 登录报「attempt to create tailnet … while logged in to …」 | 同一个浏览器里登录着另一个 Tailscale 身份 | 打开 login.tailscale.com/logout，退出客户端再重开，在无痕窗口里登录 |
+| Mac 上提示「access controls don't allow anyone」 | 管理员在网络里还没有设备，或者规则没保存 | 管理员电脑先加入网络；检查规则 |
+| 用户 SSH 被拒绝 | 规则里没给这个用户分配这台机器或这个账号 | 检查第三节第 3 步 |
+| 机器名解析不了 | 代理拦截了 MagicDNS | 直接用 100.x 地址连接，或在代理 DNS 里把 `+.ts.net` 交给 `100.100.100.100` 解析 |
+| 系统设置里看到的电源选项不对 | 系统设置窗口不会自动刷新 | ⌘Q 退出后重新打开 |

@@ -1,0 +1,12 @@
+# 运行产物
+logs/
+state/
+dist/
+.DS_Store
+# 本机专用（含个人信息），不公开
+config/host.conf
+config/site.env
+checklists/
+admin/hosts.conf
+admin/users.conf
+admin/out/

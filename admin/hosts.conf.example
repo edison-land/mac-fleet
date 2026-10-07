@@ -1,0 +1,5 @@
+# 机器清单：一行一台。
+# 机器名 = Tailscale 里的名字 = 标签 tag:<机器名>（例：mm-us-01 → tag:mm-us-01）
+# 格式：机器名  该机器的管理员账号  [mac-fleet 安装位置，省略则为 /usr/local/mac-fleet]
+mm-us-01   admin
+mm-au-01   admin

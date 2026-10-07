@@ -1,0 +1,5 @@
+# 用户分配表：一行一个人。
+# 格式：用户的 Tailscale 登录名   本地账号（每人一个，所有机器上同名，必须以 u_ 开头）   可访问的机器（空格分隔，须在 hosts.conf 里）
+# 多对多：一个人可以列多台机器；同一台机器可以出现在多个人的行里。
+alice@github             u_alice    mm-us-01 mm-au-01
+bob@passkey              u_bob      mm-us-01

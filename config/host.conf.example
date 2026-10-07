@@ -1,0 +1,47 @@
+# mac-fleet 主机配置（每台机器一份）。这是一个 bash 片段，会被各脚本 source。
+# 不要在这里写任何密码；需要密码的步骤都会在终端里交互输入。
+
+# ---- 机器 ----
+HOST_NAME="mm-01"                 # 计算机名 / 主机名 / 本地主机名，只用字母、数字和连字符
+MIN_MACOS="26.5"                  # 低于此版本直接判 FAIL（「接通电源时启动→始终」需要 26.5+）
+MIN_CHIP_GEN=4                    # 只支持 M4 及以后
+
+# ---- FileVault 方案 ----
+# A = 关闭 FileVault，开机自动登录 CONSOLE_USER，UU 自动上线
+# B = 保留 FileVault，断电后需要远程解锁（KVM 或 SSH 预启动解锁），不自动登录
+FILEVAULT_PLAN="B"
+
+# ---- 账号 ----
+ADMIN_USER=""                     # 留空 = 运行 sudo 的那个账号
+ADMIN_PUBKEY=""                   # 写入管理员 ~/.ssh/authorized_keys 的公钥（整行），留空则不写
+HARDEN_ADMIN_HOME=0               # 1 = 把管理员家目录也收紧为 700。默认 0：不动管理员账号，隔离靠把远程用户移出 staff 组（FLEET_GROUP）
+FLEET_GROUP="fleetusers"          # 远程用户的主组（不是 staff），新建账号直接放进来
+CONSOLE_USER="console"            # 开机自动登录、只跑 UU 的标准账号
+CONSOLE_FULLNAME="Console"
+MANAGED_USERS="u_alice u_bob"     # 远程用户（标准账号），空格分隔
+PASSWORD_MODE="generate"          # 新账号密码：generate＝随机生成并在终端显示一次（零输入，适合 N 台）；shared＝只问一次、共用；prompt＝逐个输入
+
+# ---- 远程入口 ----
+SSH_EXTRA_USERS="u_alice"         # 除管理员外允许 SSH 的账号（管理员总是允许）
+SCREEN_SHARE_USERS="u_alice u_bob" # 允许屏幕共享的账号
+SCREEN_INCLUDE_ADMIN=1            # 1 = 管理员也允许屏幕共享
+SSH_KEY_ONLY=0                    # 1 = 禁止密码登录（方案 B 先验证预启动解锁再开）
+
+# ---- 电源 ----
+POWER_ON_CONNECT=1                # 1 = 「接入电源时启动」选「始终」；0 = 「断电后」
+DISPLAY_SLEEP_MIN=10              # 显示器关闭时间；主机本身永不睡眠
+
+# ---- Tailscale（40-tailscale.sh）----
+TS_ENABLE=1                       # 1 = 安装开源版 tailscaled 并加入私有网络
+TS_HOSTNAME=""                    # 留空 = HOST_NAME 的小写
+TS_TAGS="tag:mac"                 # 设备标签，需先在管理后台的访问规则里定义 tagOwners
+TS_ACCEPT_DNS=0                   # 0 = 不改本机 DNS（避免和代理软件冲突）
+
+# ---- UU 远程 ----
+UU_APP="/Applications/UURemote.app"
+UU_PROC="UURemote"
+WATCHDOG_INTERVAL=300             # 守护任务检查间隔（秒）
+
+# ---- 加固 ----
+FIREWALL=1                        # 1 = 打开系统防火墙（自动允许内建签名软件）
+DISABLE_MACOS_AUTO_UPDATE=1       # 1 = 关闭「自动安装 macOS 更新」，保留安全响应
