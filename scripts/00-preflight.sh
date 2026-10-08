@@ -21,9 +21,9 @@ if has_secure_token "$ADMIN_USER"; then pass "$ADMIN_USER 有 Secure Token（可
 step "FileVault"
 info "当前：$(fv_status)"
 if [ "$FILEVAULT_PLAN" = "B" ]; then
-	if fv_is_on; then pass "方案 B 要求 FileVault 开启：已开启"; else warn "方案 B 要求 FileVault 开启：当前未开启（55-filevault 可开启）"; fi
+	if fv_is_on; then pass "方案 B 要求 FileVault 开启：已开启"; else info "方案 B 要求 FileVault 开启：当前未开启，后面的 55-filevault 会开启"; fi
 else
-	if fv_is_off; then pass "方案 A 要求 FileVault 关闭：已关闭"; else warn "方案 A 要求 FileVault 关闭：当前未关闭（55-filevault 可关闭）"; fi
+	if fv_is_off; then pass "方案 A 要求 FileVault 关闭：已关闭"; else info "方案 A 要求 FileVault 关闭：当前未关闭，后面的 55-filevault 会关闭"; fi
 fi
 
 step "网络"
