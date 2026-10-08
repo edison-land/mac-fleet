@@ -272,6 +272,13 @@ screen_allowed_users() {
 	if [ "${SCREEN_INCLUDE_ADMIN:-1}" = "1" ]; then echo "$ADMIN_USER ${SCREEN_SHARE_USERS:-}"; else echo "${SCREEN_SHARE_USERS:-}"; fi
 }
 
+# 以管理员身份执行命令：root 时用 sudo -u 切过去；本身就是管理员时直接执行（避免 sudo 弹密码导致预演卡住）
+as_admin() {
+	if [ "$(id -u)" -eq 0 ]; then sudo -u "$ADMIN_USER" "$@"
+	elif [ "$(id -un)" = "$ADMIN_USER" ]; then "$@"
+	else return 1; fi
+}
+
 WATCHDOG_LABEL="local.mac-fleet.uu-watchdog"
 SSHD_DROPIN="/etc/ssh/sshd_config.d/200-mac-fleet.conf"
 ACL_SSH="com.apple.access_ssh"

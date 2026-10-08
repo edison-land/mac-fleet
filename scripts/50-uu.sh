@@ -72,9 +72,9 @@ set_autologin() {
 # 显示器关闭（或屏保）后立即要求密码；sysadminctl 要以该用户身份、提供其密码
 set_screenlock() {
 	admin_password || return 1
-	sudo -u "$ADMIN_USER" sysadminctl -screenLock immediate -password "$ADMIN_PASSWORD" 2>&1 | grep -v -E -- '-{10,}'
+	as_admin sysadminctl -screenLock immediate -password "$ADMIN_PASSWORD" 2>&1 | grep -v -E -- '-{10,}'
 }
-screenlock_state() { sudo -u "$ADMIN_USER" sysadminctl -screenLock status 2>&1 | sed -n 's/.*screenLock delay is \(.*\)$/\1/p; s/.*[Ss]creen[Ll]ock is \(.*\)$/\1/p' | head -1; }
+screenlock_state() { as_admin sysadminctl -screenLock status 2>&1 | sed -n 's/.*screenLock delay is \(.*\)$/\1/p; s/.*[Ss]creen[Ll]ock is \(.*\)$/\1/p' | head -1; }
 
 step "UU 远程"
 if [ -d "$UU_APP" ]; then

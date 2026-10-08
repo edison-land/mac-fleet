@@ -66,7 +66,7 @@ rec autologin "$al"
 if [ "$FILEVAULT_PLAN" = "A" ]; then
 	fv_is_off && pass "FileVault 已关闭" || fail "方案 A 要求 FileVault 关闭：$fv"
 	[ "$al" = "$ADMIN_USER" ] && pass "自动登录 $ADMIN_USER" || fail "自动登录应为 ${ADMIN_USER}，当前：${al:-无}"
-	sl="$(sudo -n -u "$ADMIN_USER" sysadminctl -screenLock status 2>&1 | sed -n 's/.*screenLock delay is \(.*\)$/\1/p')"
+	sl="$(as_admin sysadminctl -screenLock status 2>&1 | sed -n 's/.*screenLock delay is \(.*\)$/\1/p')"
 	rec screenlock "$sl"
 	case "$sl" in *immediate* | "0 seconds") pass "显示器关闭后立即锁屏" ;; "") info "锁屏状态需 sudo 运行本脚本才能读取" ;; *) fail "锁屏延迟为 ${sl}，自动登录时应立即锁屏（运行 50-uu --apply）" ;; esac
 else

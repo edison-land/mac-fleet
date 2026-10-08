@@ -7,23 +7,21 @@ MIN_MACOS="26.5"                  # 低于此版本直接判 FAIL（「接通电
 MIN_CHIP_GEN=4                    # 只支持 M4 及以后
 
 # ---- FileVault 方案 ----
-# A = 关闭 FileVault，开机自动登录 CONSOLE_USER，UU 自动上线
+# A = 关闭 FileVault，开机自动登录管理员（显示器关闭即锁屏），UU 自动上线
 # B = 保留 FileVault，断电后需要远程解锁（KVM 或 SSH 预启动解锁），不自动登录
-FILEVAULT_PLAN="B"
+FILEVAULT_PLAN="A"
 
 # ---- 账号 ----
 ADMIN_USER=""                     # 留空 = 运行 sudo 的那个账号
 ADMIN_PUBKEY=""                   # 写入管理员 ~/.ssh/authorized_keys 的公钥（整行），留空则不写
 HARDEN_ADMIN_HOME=0               # 1 = 把管理员家目录也收紧为 700。默认 0：不动管理员账号，隔离靠把远程用户移出 staff 组（FLEET_GROUP）
 FLEET_GROUP="fleetusers"          # 远程用户的主组（不是 staff），新建账号直接放进来
-CONSOLE_USER="console"            # 开机自动登录、只跑 UU 的标准账号
-CONSOLE_FULLNAME="Console"
 MANAGED_USERS="u_alice u_bob"     # 远程用户（标准账号），空格分隔
 PASSWORD_MODE="generate"          # 新账号密码：generate＝随机生成并在终端显示一次（零输入，适合 N 台）；shared＝只问一次、共用；prompt＝逐个输入
 
 # ---- 远程入口 ----
 SSH_EXTRA_USERS="u_alice"         # 除管理员外允许 SSH 的账号（管理员总是允许）
-SCREEN_SHARE_USERS="u_alice u_bob" # 允许屏幕共享的账号
+SCREEN_SHARE_USERS=""             # 除管理员外允许屏幕共享的账号
 SCREEN_INCLUDE_ADMIN=1            # 1 = 管理员也允许屏幕共享
 SSH_KEY_ONLY=0                    # 1 = 禁止密码登录（方案 B 先验证预启动解锁再开）
 
