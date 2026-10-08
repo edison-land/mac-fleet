@@ -29,6 +29,19 @@ say() { printf '%s\n' "$*"; }
 ok() { printf '[OK]   %s\n' "$*"; }
 bad() { printf '[需处理] %s\n' "$*"; }
 
+if [ -n "$CODE" ]; then
+	case "$CODE" in
+	tskey-auth-*) ;;
+	tskey-client-*)
+		bad "这是管理员的 OAuth 凭证，不是接入码！不要使用，也不要再发给任何人；请让管理员立刻在后台作废它"
+		exit 2
+		;;
+	*)
+		bad "接入码应以 tskey-auth- 开头，请核对管理员发给你的内容"
+		exit 2
+		;;
+	esac
+fi
 if [ -z "$TAILNET" ] || { [ "$TAILNET" = "(接入码)" ] && [ -z "$CODE" ]; }; then
 	say "用法：bash connect-mac.sh --code <接入码> [本地账号@机器名]"
 	say "网络名和账号由管理员告诉你，例如：bash connect-mac.sh xxx.github u_alice@mm-us-01"
@@ -88,7 +101,7 @@ if [ -n "$CODE" ]; then
 			sleep 3
 		done
 		if ! "$TS" login --auth-key="$CODE" --timeout=60s; then
-			bad "接入码登录失败：接入码一次性、24 小时内有效，过期或已用过请找管理员重新生成（fleet user code 你的名字）"
+			bad "接入码登录失败（原因见上一行）：接入码一次性、24 小时内有效，过期或已用过请找管理员重新生成（fleet user code 你的名字）"
 			exit 1
 		fi
 		"$TS" up >/dev/null 2>&1
