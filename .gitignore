@@ -10,3 +10,4 @@ checklists/
 admin/hosts.conf
 admin/users.conf
 admin/out/
+__pycache__/

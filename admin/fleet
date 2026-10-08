@@ -1,0 +1,464 @@
+#!/usr/bin/env python3
+"""fleet：mac-fleet 管理命令（在管理员电脑上运行，只用 Python 标准库）。
+
+分配关系不存本地，全部存在 Tailscale 后台的访问规则里；每次都通过 API 读取、修改、校验、写回。
+
+  fleet login                          保存 OAuth 凭证（Client ID / Secret）到本机钥匙串
+  fleet list                           列出机器、用户和权限（只读）
+  fleet init                           把规则整理成 fleet 管理的标准格式（会先显示差异，输入 yes 才写入）
+  fleet host add <机器名>               登记一台新机器，输出给现场执行的初始化命令（含一次性入网密钥）
+  fleet user add <名字> <机器名>...     新用户：在机器上建账号 u_<名字>，写规则，输出给朋友的接入码和命令
+  fleet user grant <名字> <机器名>...   给已有用户加机器
+  fleet user revoke <名字> [<机器名>...] 收回某几台机器；不写机器名则收回该用户全部权限
+  fleet user code <名字>               给用户重新生成一个接入码（换电脑时用）
+
+所有修改规则的操作都会：生成新规则 → 本地检查硬性规定 → 后台校验（含自检测试）→ 备份旧规则 → 显示差异 → 输入 yes → 写入。
+"""
+import difflib
+import getpass
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+API = "https://api.tailscale.com/api/v2"
+KC_SERVICE = "mac-fleet-tailscale-oauth"
+BACKUP_DIR = os.path.expanduser("~/.local/share/mac-fleet/policy-backups")
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+USER_RE = re.compile(r"^[a-z][a-z0-9]{0,19}$")
+FLEET_DIR = "/usr/local/mac-fleet"
+INSTALL_URL = "https://raw.githubusercontent.com/edison-land"
+CLIENT_URL = "https://raw.githubusercontent.com/edison-land"
+
+RED = "\033[1;31m" if sys.stdout.isatty() else ""
+GRN = "\033[32m" if sys.stdout.isatty() else ""
+BLD = "\033[1m" if sys.stdout.isatty() else ""
+OFF = "\033[0m" if sys.stdout.isatty() else ""
+
+
+def die(msg):
+    print(f"{RED}[错误] {msg}{OFF}")
+    sys.exit(1)
+
+
+def ok(msg):
+    print(f"{GRN}[OK]{OFF} {msg}")
+
+
+# ---------------- 凭证与 API ----------------
+
+def kc_get(account):
+    r = subprocess.run(["security", "find-generic-password", "-s", KC_SERVICE, "-a", account, "-w"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def kc_set(account, value):
+    subprocess.run(["security", "add-generic-password", "-U", "-s", KC_SERVICE, "-a", account, "-w", value],
+                   check=True, capture_output=True)
+
+
+_TOKEN = None
+
+
+def token():
+    global _TOKEN
+    if _TOKEN:
+        return _TOKEN
+    cid, sec = kc_get("client_id"), kc_get("client_secret")
+    if not cid or not sec:
+        die("还没有保存凭证：先运行 fleet login")
+    data = urllib.parse.urlencode({"client_id": cid, "client_secret": sec}).encode()
+    try:
+        with urllib.request.urlopen(urllib.request.Request(f"{API}/oauth/token", data=data), timeout=30) as r:
+            _TOKEN = json.load(r)["access_token"]
+    except urllib.error.HTTPError as e:
+        die(f"换取访问令牌失败（HTTP {e.code}）：凭证不对或已撤销，重新运行 fleet login")
+    except urllib.error.URLError as e:
+        die(f"连不上 Tailscale API：{e.reason}（教育网等网络可能被拦截，换个网络试试）")
+    return _TOKEN
+
+
+def api(method, path, body=None, headers=None, raw=False):
+    h = {"Authorization": f"Bearer {token()}"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        h["Content-Type"] = "application/json"
+    if headers:
+        h.update(headers)
+    req = urllib.request.Request(f"{API}{path}", data=data, method=method, headers=h)
+    # 握手被断（代理抖动等）时重试；写规则带 If-Match，重试不会覆盖别人的改动
+    for i in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                txt = r.read().decode()
+                return (txt, dict(r.headers)) if raw else (json.loads(txt) if txt.strip() else {})
+        except urllib.error.HTTPError as e:
+            msg = e.read().decode(errors="replace")
+            die(f"API {method} {path} 失败（HTTP {e.code}）：{msg[:500]}")
+        except (urllib.error.URLError, OSError) as e:
+            if i == 3:
+                die(f"连不上 Tailscale API（已重试 3 次）：{getattr(e, 'reason', e)}。检查网络/代理后重跑同一条命令")
+            time.sleep(2 * (i + 1))
+
+
+def get_policy():
+    txt, hdr = api("GET", "/tailnet/-/acl", headers={"Accept": "application/json"}, raw=True)
+    etag = hdr.get("ETag") or hdr.get("Etag") or ""
+    return json.loads(txt), etag
+
+
+def get_devices():
+    return api("GET", "/tailnet/-/devices?fields=all").get("devices", [])
+
+
+# ---------------- 规则模型 ----------------
+# 标签约定：tag:fleet-admin（fleet 自己）、tag:mac（所有 Mac）、tag:<机器名>、tag:u-<用户名>
+
+def owners():
+    return ["autogroup:admin", "tag:fleet-admin"]
+
+
+def model_from_policy(p):
+    """从规则里读出：机器列表、用户 → (账号, [机器])。"""
+    hosts, users = [], {}
+    for t in p.get("tagOwners", {}):
+        n = t[4:]
+        if t in ("tag:fleet-admin", "tag:mac"):
+            continue
+        if n.startswith("u-"):
+            users.setdefault(n[2:], {"account": f"u_{n[2:]}", "hosts": []})
+        else:
+            hosts.append(n)
+    for r in p.get("ssh", []):
+        src = r.get("src", [])
+        if len(src) == 1 and src[0].startswith("tag:u-"):
+            u = src[0][6:]
+            users.setdefault(u, {"account": f"u_{u}", "hosts": []})
+            users[u]["hosts"] = sorted({d[4:] for d in r.get("dst", []) if d.startswith("tag:")} | set(users[u]["hosts"]))
+    return sorted(hosts), users
+
+
+def build_policy(hosts, users, old=None):
+    """按模型生成 tagOwners/grants/ssh/tests/sshTests；其他顶层项（如 nodeAttrs）原样保留。"""
+    p = {k: v for k, v in (old or {}).items() if k not in ("tagOwners", "grants", "ssh", "tests", "sshTests", "acls")}
+    p["tagOwners"] = {"tag:fleet-admin": ["autogroup:admin"], "tag:mac": owners()}
+    for h in sorted(hosts):
+        p["tagOwners"][f"tag:{h}"] = owners()
+    for u in sorted(users):
+        p["tagOwners"][f"tag:u-{u}"] = owners()
+    grants = [
+        {"src": ["autogroup:admin"], "dst": ["*"], "ip": ["*"]},
+        {"src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"]},
+    ]
+    ssh = [
+        {"action": "accept", "src": ["autogroup:admin"], "dst": ["tag:mac"], "users": ["autogroup:nonroot"]},
+        # 管理员以 root 登录（fleet 远程建账号用）：check 模式，每 12 小时要在浏览器里确认一次身份
+        {"action": "check", "src": ["autogroup:admin"], "dst": ["tag:mac"], "users": ["root"], "checkPeriod": "12h"},
+        {"action": "check", "src": ["autogroup:member"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot", "root"]},
+    ]
+    tests, ssh_tests = [], []
+    for u in sorted(users):
+        hs = sorted(users[u]["hosts"])
+        if not hs:
+            continue
+        dst = [f"tag:{h}" for h in hs]
+        grants.append({"src": [f"tag:u-{u}"], "dst": dst, "ip": ["tcp:22", "udp:60000-61000"]})
+        ssh.append({"action": "accept", "src": [f"tag:u-{u}"], "dst": dst, "users": [users[u]["account"]]})
+        others = [h for h in hosts if h not in hs]
+        t = {"src": f"tag:u-{u}", "accept": [f"tag:{h}:22" for h in hs]}
+        if others:
+            t["deny"] = [f"tag:{h}:22" for h in others]
+        tests.append(t)
+        deny = ["root"] + sorted(users[o]["account"] for o in users if o != u)
+        ssh_tests.append({"src": f"tag:u-{u}", "dst": dst, "accept": [users[u]["account"]], "deny": deny})
+    p["grants"] = grants
+    p["ssh"] = ssh
+    if tests:
+        p["tests"] = tests
+    if ssh_tests:
+        p["sshTests"] = ssh_tests
+    return p
+
+
+def check_invariants(p):
+    """硬性规定：违反就拒绝推送（防手误）。"""
+    errs = []
+    for g in p.get("grants", []):
+        src = g.get("src", [])
+        if "tag:mac" in src:
+            errs.append(f"tag:mac 不能出现在发起方：{g}")
+        if src != ["autogroup:admin"] and src != ["autogroup:member"]:
+            if "*" in g.get("dst", []) or "tag:mac" in g.get("dst", []):
+                errs.append(f"非管理员规则的目标只能是单台机器标签：{g}")
+    for r in p.get("ssh", []):
+        src = r.get("src", [])
+        if len(src) == 1 and src[0].startswith("tag:u-"):
+            u = src[0][6:]
+            if r.get("users") != [f"u_{u}"]:
+                errs.append(f"用户 {u} 只能以 u_{u} 登录：{r}")
+            if "tag:mac" in r.get("dst", []):
+                errs.append(f"用户规则的目标只能是单台机器标签：{r}")
+    return errs
+
+
+def push_policy(new, old, etag, reason):
+    errs = check_invariants(new)
+    if errs:
+        die("新规则违反硬性规定，已拒绝：\n  " + "\n  ".join(errs))
+    print(f"\n{BLD}== 后台校验（含自检测试）{OFF}")
+    res = api("POST", "/tailnet/-/acl/validate", body=new)
+    if res and res.get("message"):
+        die(f"后台校验没通过：{json.dumps(res, ensure_ascii=False)[:800]}")
+    ok("校验通过")
+    a = json.dumps(old, ensure_ascii=False, indent=2, sort_keys=True).splitlines()
+    b = json.dumps(new, ensure_ascii=False, indent=2, sort_keys=True).splitlines()
+    diff = [l for l in difflib.unified_diff(a, b, "后台现有规则", "新规则", lineterm="", n=1)]
+    if not diff:
+        ok("规则没有变化，不需要写入")
+        return
+    print(f"\n{BLD}== 规则变化（{reason}）{OFF}")
+    for l in diff[2:]:
+        if l.startswith("+"):
+            print(f"{GRN}{l}{OFF}")
+        elif l.startswith("-"):
+            print(f"{RED}{l}{OFF}")
+        elif l.startswith("@@"):
+            continue
+        else:
+            print(l)
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    bk = os.path.join(BACKUP_DIR, time.strftime("policy-%Y%m%d-%H%M%S.json"))
+    with open(bk, "w") as f:
+        json.dump(old, f, ensure_ascii=False, indent=2)
+    print(f"\n旧规则已备份：{bk}")
+    if not sys.stdin.isatty():
+        die("不是交互终端，只预览不写入")
+    if input("输入 yes 写入新规则：").strip() != "yes":
+        die("已取消，规则没有改动")
+    api("POST", "/tailnet/-/acl", body=new, headers={"If-Match": etag} if etag else None)
+    ok("规则已写入")
+
+
+def create_key(tags, desc):
+    body = {"capabilities": {"devices": {"create": {"reusable": False, "ephemeral": False,
+                                                     "preauthorized": True, "tags": tags}}},
+            "expirySeconds": 86400, "description": desc[:50]}
+    return api("POST", "/tailnet/-/keys", body=body)["key"]
+
+
+def host_device(devs, h):
+    for d in devs:
+        if d.get("name", "").split(".")[0] == h or d.get("hostname") == h:
+            return d
+    return None
+
+
+def remote(host, cmd):
+    """以 root 经 Tailscale SSH 在机器上执行（check 模式下首次会提示在浏览器确认身份）。"""
+    print(f"  → {host}: {cmd}")
+    r = subprocess.run(["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", f"root@{host}", cmd])
+    return r.returncode == 0
+
+
+# ---------------- 命令 ----------------
+
+def cmd_login(_):
+    cid = input("Client ID：").strip()
+    sec = getpass.getpass("Client Secret（tskey-client-…，输入时不显示）：").strip()
+    if not cid or not sec.startswith("tskey-client-"):
+        die("看起来不对：Secret 应以 tskey-client- 开头")
+    kc_set("client_id", cid)
+    kc_set("client_secret", sec)
+    global _TOKEN
+    _TOKEN = None
+    token()
+    p, _ = get_policy()
+    ok(f"凭证已存进钥匙串（{KC_SERVICE}），已能读取规则（{len(p.get('tagOwners', {}))} 个标签）")
+
+
+def cmd_list(_):
+    p, _ = get_policy()
+    hosts, users = model_from_policy(p)
+    devs = get_devices()
+    print(f"{BLD}== 机器{OFF}")
+    for h in hosts:
+        d = host_device(devs, h)
+        if d:
+            tags = ",".join(d.get("tags", []))
+            online = "在线" if d.get("connectedToControl") else "离线"
+            print(f"  {h:28s} {d.get('addresses', ['?'])[0]:15s} {online}  标签 {tags}")
+        else:
+            print(f"  {h:28s} {RED}还没有加入网络{OFF}")
+    print(f"\n{BLD}== 用户 → 可访问的机器{OFF}")
+    if not users:
+        print("  （还没有用户）")
+    for u, v in sorted(users.items()):
+        ds = [d for d in devs if f"tag:u-{u}" in d.get("tags", [])]
+        st = f"{len(ds)} 台设备已接入" if ds else "还没接入"
+        print(f"  {u:12s} 账号 {v['account']:12s} {st:10s} → {', '.join(v['hosts']) or '无'}")
+        for h in v["hosts"]:
+            print(f"      ssh {v['account']}@{h}")
+    errs = check_invariants(p)
+    if errs:
+        print(f"\n{RED}当前规则有不符合硬性规定的地方：{OFF}")
+        for e in errs:
+            print(f"  {RED}• {e}{OFF}")
+
+
+def cmd_init(_):
+    p, etag = get_policy()
+    hosts, users = model_from_policy(p)
+    push_policy(build_policy(hosts, users, p), p, etag, "整理为 fleet 标准格式")
+
+
+def cmd_host_add(a):
+    if len(a) != 1 or not NAME_RE.match(a[0]):
+        die("用法：fleet host add <机器名>（小写字母、数字、连字符）")
+    h = a[0]
+    p, etag = get_policy()
+    hosts, users = model_from_policy(p)
+    if h not in hosts:
+        push_policy(build_policy(hosts + [h], users, p), p, etag, f"登记机器 {h}")
+    d = host_device(get_devices(), h)
+    if d:
+        want = sorted(set(d.get("tags", [])) | {"tag:mac", f"tag:{h}"})
+        if want != sorted(d.get("tags", [])):
+            api("POST", f"/device/{d['nodeId']}/tags", body={"tags": want})
+            ok(f"{h} 已在网络中，补上标签：{', '.join(want)}")
+        else:
+            ok(f"{h} 已在网络中，标签齐全")
+        return
+    key = create_key(["tag:mac", f"tag:{h}"], f"host {h}")
+    print(f"\n{BLD}== 发给现场（在这台 Mac 的管理员账号终端里逐行粘贴）{OFF}")
+    print("cd /tmp")
+    print(f"B={INSTALL_URL}")
+    print("curl -fsSL -o i.sh $B/mac-fleet/main/install.sh")
+    print(f"export TS_AUTHKEY={key}")
+    print(f"sudo -E HOST_NAME={h} bash i.sh")
+    print(f"\n入网密钥一次性、24 小时内有效，已带标签 tag:mac 和 tag:{h}。")
+
+
+def ensure_account(h, acct):
+    cmd = (f"id -u {acct} >/dev/null 2>&1 && echo 账号已存在 || "
+           "ADMIN_USER=$(defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null "
+           f"|| stat -f %Su /dev/console) FLEET_CONF=/nonexistent MANAGED_USERS={acct} "
+           f"bash {FLEET_DIR}/scripts/20-accounts.sh --apply --yes")
+    if not remote(h, cmd):
+        die(f"在 {h} 上建账号 {acct} 失败（见上面的输出）。规则还没改，修好后重跑同一条命令即可")
+
+
+def client_message(u, acct, hs, key):
+    print(f"\n{BLD}== 发给 {u}（私聊；接入码一次性、24 小时内有效）{OFF}")
+    print("在你的 Mac 终端里逐行粘贴：")
+    print("cd /tmp")
+    print(f"B={CLIENT_URL}")
+    print("curl -fsSL -o c.sh $B/mac-fleet/main/client/connect-mac.sh")
+    print(f"bash c.sh --code {key} {acct}@{hs[0]}")
+    print("以后连接：")
+    for h in hs:
+        print(f"ssh {acct}@{h}")
+
+
+def cmd_user_add(a, grant_only=False):
+    if len(a) < 2 or not USER_RE.match(a[0]):
+        die("用法：fleet user add <名字> <机器名>...（名字：小写字母开头，字母数字，最多 20 位）")
+    u, new_hosts = a[0], a[1:]
+    acct = f"u_{u}"
+    p, etag = get_policy()
+    hosts, users = model_from_policy(p)
+    devs = get_devices()
+    for h in new_hosts:
+        if h not in hosts:
+            die(f"规则里没有机器 {h}：先 fleet host add {h}")
+        if not host_device(devs, h):
+            die(f"{h} 还没有加入网络")
+    if grant_only and u not in users:
+        die(f"没有用户 {u}：先 fleet user add")
+    if not grant_only and u in users:
+        die(f"用户 {u} 已存在：加机器用 fleet user grant，换电脑用 fleet user code")
+    print(f"{BLD}== 1/3 在机器上建账号 {acct}{OFF}")
+    for h in new_hosts:
+        ensure_account(h, acct)
+    print(f"\n{BLD}== 2/3 更新规则{OFF}")
+    cur = users.get(u, {"account": acct, "hosts": []})
+    cur["hosts"] = sorted(set(cur["hosts"]) | set(new_hosts))
+    users[u] = cur
+    push_policy(build_policy(hosts, users, p), p, etag, f"{u} 可访问 {', '.join(cur['hosts'])}")
+    if grant_only:
+        ok(f"{u} 现在可以访问：{', '.join(cur['hosts'])}（她已接入的设备不用重做）")
+        for h in cur["hosts"]:
+            print(f"  ssh {acct}@{h}")
+        return
+    print(f"\n{BLD}== 3/3 生成接入码{OFF}")
+    key = create_key([f"tag:u-{u}"], f"user {u}")
+    client_message(u, acct, cur["hosts"], key)
+
+
+def cmd_user_revoke(a):
+    if not a:
+        die("用法：fleet user revoke <名字> [<机器名>...]")
+    u, rm = a[0], a[1:]
+    p, etag = get_policy()
+    hosts, users = model_from_policy(p)
+    if u not in users:
+        die(f"没有用户 {u}")
+    if rm:
+        users[u]["hosts"] = [h for h in users[u]["hosts"] if h not in rm]
+    if not rm or not users[u]["hosts"]:
+        del users[u]
+    push_policy(build_policy(hosts, users, p), p, etag, f"收回 {u} 的权限：{', '.join(rm) or '全部'}")
+    print(f"机器上的账号 u_{u} 没有删除（数据还在）。确认不需要了，可在那台机器上：sudo sysadminctl -deleteUser u_{u}")
+    if u not in users:
+        print("她已接入的设备会失去全部访问权限；如需移除设备，在后台 Machines 删除带 tag:u-" + u + " 的设备")
+
+
+def cmd_user_code(a):
+    if len(a) != 1:
+        die("用法：fleet user code <名字>")
+    u = a[0]
+    p, _ = get_policy()
+    _, users = model_from_policy(p)
+    if u not in users or not users[u]["hosts"]:
+        die(f"没有用户 {u}，或她没有可访问的机器")
+    key = create_key([f"tag:u-{u}"], f"user {u}")
+    client_message(u, users[u]["account"], users[u]["hosts"], key)
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return
+    if a[0] == "login":
+        cmd_login(a[1:])
+    elif a[0] == "list":
+        cmd_list(a[1:])
+    elif a[0] == "init":
+        cmd_init(a[1:])
+    elif a[:2] == ["host", "add"]:
+        cmd_host_add(a[2:])
+    elif a[:2] == ["user", "add"]:
+        cmd_user_add(a[2:])
+    elif a[:2] == ["user", "grant"]:
+        cmd_user_add(a[2:], grant_only=True)
+    elif a[:2] == ["user", "revoke"]:
+        cmd_user_revoke(a[2:])
+    elif a[:2] == ["user", "code"]:
+        cmd_user_code(a[2:])
+    else:
+        die("不认识的命令，运行 fleet help 查看用法")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n已取消")
+        sys.exit(130)
