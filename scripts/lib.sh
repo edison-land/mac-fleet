@@ -25,13 +25,23 @@ N_PLAN=0
 
 # ---------- 输出 ----------
 
-pass() { N_PASS=$((N_PASS + 1)); echo "[PASS] $*"; }
-fail() { N_FAIL=$((N_FAIL + 1)); echo "[FAIL] $*"; }
-warn() { N_WARN=$((N_WARN + 1)); echo "[WARN] $*"; }
-todo() { N_TODO=$((N_TODO + 1)); echo "[TODO] $*"; }
+# 颜色：输出到终端时，需要注意的（FAIL / WARN / TODO）用红色，通过的用绿色；日志文件里不带颜色。
+# FLEET_ATTENTION_FILE：bootstrap 设置后，所有需要注意的行都会汇总到这个文件，最后统一用红字列出。
+C_RED="" C_GRN="" C_BLD="" C_OFF=""
+set_colors() {
+	if [ -t 1 ] || [ "${FLEET_COLOR:-0}" = "1" ]; then
+		C_RED=$'\033[1;31m' C_GRN=$'\033[32m' C_BLD=$'\033[1m' C_OFF=$'\033[0m'
+	fi
+}
+attention() { [ -n "${FLEET_ATTENTION_FILE:-}" ] && printf '%s｜%s %s\n' "$SCRIPT_NAME" "$1" "$2" >>"$FLEET_ATTENTION_FILE"; return 0; }
+
+pass() { N_PASS=$((N_PASS + 1)); echo "${C_GRN}[PASS]${C_OFF} $*"; }
+fail() { N_FAIL=$((N_FAIL + 1)); echo "${C_RED}[FAIL] $*${C_OFF}"; attention "[FAIL]" "$*"; }
+warn() { N_WARN=$((N_WARN + 1)); echo "${C_RED}[WARN] $*${C_OFF}"; attention "[WARN]" "$*"; }
+todo() { N_TODO=$((N_TODO + 1)); echo "${C_RED}[TODO] $*${C_OFF}"; attention "[TODO]" "$*"; }
 info() { echo "       $*"; }
-step() { echo; echo "== $*"; }
-die()  { echo "[FAIL] $*"; exit 2; }
+step() { echo; echo "${C_BLD}== $*${C_OFF}"; }
+die()  { echo "${C_RED}[FAIL] $*${C_OFF}"; attention "[FAIL]" "$*"; exit 2; }
 
 # change "说明" 命令 参数...
 # 检查模式只打印计划；--apply 时执行，失败计入 FAIL。
@@ -68,7 +78,11 @@ has_flag() { case "$EXTRA_FLAGS" in *" $1 "*) return 0 ;; esac; return 1; }
 
 summary() {
 	echo
-	echo "== 汇总：PASS $N_PASS · FAIL $N_FAIL · WARN $N_WARN · TODO $N_TODO · 待执行修改 $N_PLAN"
+	if [ "$N_FAIL" -gt 0 ]; then
+		echo "${C_RED}== 汇总：PASS $N_PASS · FAIL $N_FAIL · WARN $N_WARN · TODO $N_TODO · 待执行修改 ${N_PLAN}${C_OFF}"
+	else
+		echo "${C_BLD}== 汇总：PASS $N_PASS · FAIL $N_FAIL · WARN $N_WARN · TODO $N_TODO · 待执行修改 ${N_PLAN}${C_OFF}"
+	fi
 	if [ "$MODE" = "check" ] && [ "$N_PLAN" -gt 0 ]; then
 		echo "   这是检查模式，没有做任何修改。确认上面的 [PLAN] 无误后执行："
 		echo "   sudo bash scripts/${SCRIPT_NAME}.sh --apply${RERUN_ARGS}"
@@ -139,7 +153,9 @@ fleet_init() {
 	if [ -n "${SUDO_UID:-}" ]; then
 		chown "$SUDO_UID" "$FLEET_ROOT/logs" "$FLEET_ROOT/state" "$LOG_FILE" 2>/dev/null
 	fi
-	exec > >(tee -a "$LOG_FILE") 2>&1
+	set_colors
+	# 终端上保留颜色，写进日志时去掉颜色控制符
+	exec > >(tee >(perl -pe 's/\e\[[0-9;]*m//g' >>"$LOG_FILE")) 2>&1
 
 	echo "mac-fleet · ${SCRIPT_NAME} · 模式=${MODE} · 方案=${FILEVAULT_PLAN}"
 	echo "主机 $(scutil --get ComputerName 2>/dev/null) · macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion)) · $(date '+%Y-%m-%d %H:%M:%S %z')"

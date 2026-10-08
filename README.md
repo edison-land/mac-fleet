@@ -3,6 +3,7 @@
 把 M4 及以后的 Mac mini 配置成「断电自动恢复 + 多人远程使用」的主机，并能复制到 N 台机器。
 
 - **接入 SOP（先看这个）**：[docs/SOP.md](docs/SOP.md)
+- **服务端一条命令（推荐）**：`curl -fsSL -o /tmp/i.sh https://raw.githubusercontent.com/edison-land/mac-fleet/main/install.sh && sudo HOST_NAME=mm-us-01 bash /tmp/i.sh`（可反复执行；缺 Homebrew 自动安装；需要注意的事项红字显示）
 - 管理员生成专属包：`bash admin/make-package.sh mm-us-01`（包内含主机名和一次性密钥）
 - 服务端一条命令：`cd ~/Downloads && ditto -x -k mac-fleet-mm-us-01.zip . && cd mac-fleet && sudo bash bootstrap.sh`（预演：`bash bootstrap.sh --check`）
 - 客户端一条命令：`bash client/connect-mac.sh <网络名> u_alice@mm-us-01`
