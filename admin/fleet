@@ -7,7 +7,7 @@
   fleet list                           列出机器、用户和权限（只读）
   fleet init                           把规则整理成 fleet 管理的标准格式（会先显示差异，输入 yes 才写入）
   fleet host add <机器名>               登记一台新机器，输出给现场执行的初始化命令（含一次性入网密钥）
-  fleet user add <名字> <机器名>...     新用户：在机器上建账号 u_<名字>，写规则，输出给朋友的接入码和命令
+  fleet user add <名字> <机器名>...     新用户：在机器上建同名账号，写规则，输出给朋友的接入码和命令
   fleet user grant <名字> <机器名>...   给已有用户加机器
   fleet user revoke <名字> [<机器名>...] 收回某几台机器；不写机器名则收回该用户全部权限
   fleet user code <名字>               给用户重新生成一个接入码（换电脑时用）
@@ -133,14 +133,16 @@ def model_from_policy(p):
         if t in ("tag:fleet-admin", "tag:mac"):
             continue
         if n.startswith("u-"):
-            users.setdefault(n[2:], {"account": f"u_{n[2:]}", "hosts": []})
+            users.setdefault(n[2:], {"account": n[2:], "hosts": []})
         else:
             hosts.append(n)
     for r in p.get("ssh", []):
         src = r.get("src", [])
         if len(src) == 1 and src[0].startswith("tag:u-"):
             u = src[0][6:]
-            users.setdefault(u, {"account": f"u_{u}", "hosts": []})
+            users.setdefault(u, {"account": u, "hosts": []})
+            if r.get("users"):
+                users[u]["account"] = r["users"][0]
             users[u]["hosts"] = sorted({d[4:] for d in r.get("dst", []) if d.startswith("tag:")} | set(users[u]["hosts"]))
     return sorted(hosts), users
 
@@ -201,8 +203,9 @@ def check_invariants(p):
         src = r.get("src", [])
         if len(src) == 1 and src[0].startswith("tag:u-"):
             u = src[0][6:]
-            if r.get("users") != [f"u_{u}"]:
-                errs.append(f"用户 {u} 只能以 u_{u} 登录：{r}")
+            # 账号名＝用户名（早期版本建的 u_<名字> 仍然认）
+            if r.get("users") not in ([u], [f"u_{u}"]):
+                errs.append(f"用户 {u} 只能以自己的账号 {u} 登录：{r}")
             if "tag:mac" in r.get("dst", []):
                 errs.append(f"用户规则的目标只能是单台机器标签：{r}")
     return errs
@@ -346,7 +349,10 @@ def cmd_host_add(a):
 
 
 def ensure_account(h, acct):
-    cmd = (f"id -u {acct} >/dev/null 2>&1 && echo 账号已存在 || "
+    # 已有同名账号：只有 fleet 建的（主组 fleetusers）才继续，管理员、本人账号一律不碰
+    cmd = (f"if id -u {acct} >/dev/null 2>&1; then "
+           f"[ \"$(id -gn {acct})\" = fleetusers ] && echo 账号 {acct} 已存在 && exit 0; "
+           f"echo 机器上已有账号 {acct}，不是 fleet 建的，换个名字; exit 3; fi; "
            "ADMIN_USER=$(defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null "
            f"|| stat -f %Su /dev/console) FLEET_CONF=/nonexistent MANAGED_USERS={acct} "
            f"bash {FLEET_DIR}/scripts/20-accounts.sh --apply --yes")
@@ -370,7 +376,7 @@ def cmd_user_add(a, grant_only=False):
     if len(a) < 2 or not USER_RE.match(a[0]):
         die("用法：fleet user add <名字> <机器名>...（名字：小写字母开头，字母数字，最多 20 位）")
     u, new_hosts = a[0], a[1:]
-    acct = f"u_{u}"
+    acct = u
     p, etag = get_policy()
     hosts, users = model_from_policy(p)
     devs = get_devices()
@@ -383,6 +389,8 @@ def cmd_user_add(a, grant_only=False):
         die(f"没有用户 {u}：先 fleet user add")
     if not grant_only and u in users:
         die(f"用户 {u} 已存在：加机器用 fleet user grant，换电脑用 fleet user code")
+    if u in users:
+        acct = users[u]["account"]
     print(f"{BLD}== 1/3 在机器上建账号 {acct}{OFF}")
     for h in new_hosts:
         ensure_account(h, acct)
@@ -392,7 +400,7 @@ def cmd_user_add(a, grant_only=False):
     users[u] = cur
     push_policy(build_policy(hosts, users, p), p, etag, f"{u} 可访问 {', '.join(cur['hosts'])}")
     if grant_only:
-        ok(f"{u} 现在可以访问：{', '.join(cur['hosts'])}（她已接入的设备不用重做）")
+        ok(f"{u} 现在可以访问：{', '.join(cur['hosts'])}（对方已接入的设备不用重做）")
         for h in cur["hosts"]:
             print(f"  ssh {acct}@{h}")
         return
@@ -409,14 +417,20 @@ def cmd_user_revoke(a):
     hosts, users = model_from_policy(p)
     if u not in users:
         die(f"没有用户 {u}")
+    old_hosts, old_acct = list(users[u]["hosts"]), users[u]["account"]
     if rm:
         users[u]["hosts"] = [h for h in users[u]["hosts"] if h not in rm]
     if not rm or not users[u]["hosts"]:
         del users[u]
     push_policy(build_policy(hosts, users, p), p, etag, f"收回 {u} 的权限：{', '.join(rm) or '全部'}")
-    print(f"机器上的账号 u_{u} 没有删除（数据还在）。确认不需要了，可在那台机器上：sudo sysadminctl -deleteUser u_{u}")
-    if u not in users:
-        print("她已接入的设备会失去全部访问权限；如需移除设备，在后台 Machines 删除带 tag:u-" + u + " 的设备")
+    gone = rm or old_hosts
+    acct = old_acct
+    if input(f"\n同时删除 {', '.join(gone)} 上的账号 {acct} 及其文件？（不删就直接回车；删除输入 yes）：").strip() == "yes":
+        for h in gone:
+            remote(h, f"[ \"$(id -gn {acct} 2>/dev/null)\" = fleetusers ] && sysadminctl -deleteUser {acct} && echo 已删除 {acct} "
+                      f"|| echo 跳过：{acct} 不存在或不是 fleet 建的")
+    else:
+        print(f"账号 {acct} 保留在机器上（文件还在）")
 
 
 def cmd_user_code(a):
@@ -426,7 +440,7 @@ def cmd_user_code(a):
     p, _ = get_policy()
     _, users = model_from_policy(p)
     if u not in users or not users[u]["hosts"]:
-        die(f"没有用户 {u}，或她没有可访问的机器")
+        die(f"没有用户 {u}，或对方没有可访问的机器")
     key = create_key([f"tag:u-{u}"], f"user {u}")
     client_message(u, users[u]["account"], users[u]["hosts"], key)
 
