@@ -416,22 +416,27 @@ def cmd_user_revoke(a):
     p, etag = get_policy()
     hosts, users = model_from_policy(p)
     if u not in users:
-        die(f"没有用户 {u}")
+        if not rm:
+            die(f"规则里已经没有用户 {u}。机器上还留着账号的话：fleet user revoke {u} <机器名>")
+        delete_accounts(u, rm)
+        return
     old_hosts, old_acct = list(users[u]["hosts"]), users[u]["account"]
     if rm:
         users[u]["hosts"] = [h for h in users[u]["hosts"] if h not in rm]
     if not rm or not users[u]["hosts"]:
         del users[u]
     push_policy(build_policy(hosts, users, p), p, etag, f"收回 {u} 的权限：{', '.join(rm) or '全部'}")
-    gone = rm or old_hosts
-    acct = old_acct
+    delete_accounts(old_acct, rm or old_hosts)
+
+
+def delete_accounts(acct, gone):
     if input(f"\n同时删除 {', '.join(gone)} 上的账号 {acct} 及其文件？（不删就直接回车；删除输入 yes）：").strip() == "yes":
         for h in gone:
             del_cmd = (f"[ \"$(id -gn {acct} 2>/dev/null)\" = fleetusers ] && sysadminctl -deleteUser {acct} && echo 已删除 {acct} "
                       f"|| echo 跳过：{acct} 不存在或不是 fleet 建的")
             if not remote(h, del_cmd):
                 print(f"{RED}[没删成] 连不上 {h}（管理员电脑要在自己的 Tailscale 网络里）。连上后重跑：{OFF}")
-                print(f"  ssh root@{h} 'sysadminctl -deleteUser {acct}'")
+                print(f"  fleet user revoke {acct} {h}")
     else:
         print(f"账号 {acct} 保留在机器上（文件还在）")
 
