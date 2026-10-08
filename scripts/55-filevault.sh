@@ -39,7 +39,7 @@ if [ "$FILEVAULT_PLAN" = "A" ]; then
 		fi
 	fi
 	[ "$MODE" = "apply" ] && info "现在：$(fv_status)"
-	todo "FileVault 关闭后运行：sudo bash scripts/50-uu.sh --apply --plan=A"
+	fv_is_off || info "FileVault 关闭后运行：sudo bash scripts/50-uu.sh --apply --plan=A"
 else
 	if fv_is_on; then
 		pass "方案 B：FileVault 已开启"

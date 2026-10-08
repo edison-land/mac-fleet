@@ -167,13 +167,13 @@ fi
 
 step "从另一台电脑验证（贴回结果）"
 info "本机地址：$(ipv4_list)"
-todo "系统设置 → 通用 → 共享：远程登录、屏幕共享都显示「仅这些用户」，名单与上面一致（截图贴回）"
-todo "在 MBP 上：ssh $ADMIN_USER@<上面的IP> 能登录"
+info "可在 系统设置 → 通用 → 共享 核对：远程登录、屏幕共享都显示「仅这些用户」，名单与上面一致（截图贴回）"
+info "验证：ssh $ADMIN_USER@<上面的IP> 能登录"
 for u in $(managed_users); do
 	if in_list "$u" "$(ssh_allowed_users)"; then
-		todo "在 MBP 上：ssh $u@<IP> 输入正确密码后应能登录"
+		info "验证：ssh $u@<IP> 输入正确密码后应能登录"
 	else
-		todo "在 MBP 上：ssh $u@<IP> 输入正确密码后仍应被拒绝（验证访问组生效）"
+		info "验证：ssh $u@<IP> 输入正确密码后仍应被拒绝（验证访问组生效）"
 	fi
 done
 

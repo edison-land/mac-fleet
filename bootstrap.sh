@@ -180,7 +180,7 @@ if [ -s "$ATTN" ]; then
 fi
 rm -f "$ATTN"
 say ""
-say "UU 只需配置一次（在 ${SUDO_USER} 的桌面里；可以本机操作，也可以在管理员电脑上 open vnc://${ts_name%.} 远程登录 ${SUDO_USER}）："
+say_red "还需要手动配置一次 UU（在 ${SUDO_USER} 的桌面里；可以本机操作，也可以在管理员电脑上 open vnc://${ts_name%.} 远程登录 ${SUDO_USER}）："
 say "  1. 打开 UU 远程 → 登录 UU 账号"
 say "  2. 授权「屏幕与系统音频录制」「辅助功能」，然后重启 UU"
 say "  3. UU → 设置中心：勾选「开机自动启动」「防止电脑休眠」，安全里打开「允许本设备被控」"

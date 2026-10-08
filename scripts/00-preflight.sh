@@ -53,7 +53,7 @@ wifi)
 		pass "优先级最高的 Wi-Fi「${first}」密码在系统钥匙串：开机后无人登录也能自动连上"
 	else
 		warn "优先级最高的 Wi-Fi「${first}」密码不在系统钥匙串：开机后可能要等有人登录才联网"
-		todo "用管理员账号在 系统设置 → Wi-Fi 里忘记该网络后重新加入一次"
+		todo "最好接网线；否则改连家里路由器自己的 Wi-Fi（WPA2 个人版），用管理员账号加入，并删掉公共热点（如 XFINITY / xfinitywifi）等其他已保存网络"
 	fi
 	case "$sec" in
 	WPA2_PSK | NONE | "")
@@ -102,7 +102,7 @@ info "管理员家目录 $(user_home "$ADMIN_USER") 权限 $(home_mode "$ADMIN_U
 info "macOS 新建家目录是 750（staff 组可读）；20-accounts 会把远程用户移出 staff，使其读不到管理员文件"
 
 step "提醒"
-todo "改动前确认这台 Mac 有近期的 Time Machine 备份（后面有拔电测试）"
+info "建议：改动前确认这台 Mac 有近期的 Time Machine 备份"
 
 step "记录当前设置（回滚用）"
 BK="$FLEET_ROOT/state/backup-$TS"
