@@ -362,11 +362,13 @@ def ensure_account(h, acct):
 
 def client_message(u, acct, hs, key):
     print(f"\n{BLD}== 发给 {u}（私聊；接入码一次性、24 小时内有效）{OFF}")
-    print("在你的 Mac 终端里逐行粘贴：")
+    print("在你的 Mac 终端里逐行粘贴（K= 那一行要完整复制）：")
     print("cd /tmp")
     print(f"B={CLIENT_URL}")
     print("curl -fsSL -o c.sh $B/mac-fleet/main/client/connect-mac.sh")
-    print(f"bash c.sh --code {key} {acct}@{hs[0]}")
+    # 接入码单独一行：长行复制时容易被换行截断
+    print(f"K={key}")
+    print(f"bash c.sh --code $K {acct}@{hs[0]}")
     print("以后连接：")
     for h in hs:
         print(f"ssh {acct}@{h}")

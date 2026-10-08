@@ -46,7 +46,8 @@ fleet user add alice mm-us-01
 cd /tmp
 B=https://raw.githubusercontent.com/edison-land
 curl -fsSL -o c.sh $B/mac-fleet/main/client/connect-mac.sh
-bash c.sh --code tskey-auth-… alice@mm-us-01
+K=tskey-auth-…
+bash c.sh --code $K alice@mm-us-01
 ```
 
 第一次安装 Tailscale 时输入电脑密码，并允许「添加 VPN 配置」「网络扩展」。看到 `登录成功：alice@…` 即完成，以后：
