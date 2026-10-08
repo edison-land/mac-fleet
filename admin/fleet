@@ -156,7 +156,8 @@ def build_policy(hosts, users, old=None):
     for u in sorted(users):
         p["tagOwners"][f"tag:u-{u}"] = owners()
     grants = [
-        {"src": ["autogroup:admin"], "dst": ["*"], "ip": ["*"]},
+        # 管理员只到 Mac（不到朋友设备）：可见性是双向的，dst 写 * 会让朋友在设备列表里看到管理员的电脑
+        {"src": ["autogroup:admin"], "dst": ["tag:mac"], "ip": ["*"]},
         {"src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"]},
     ]
     ssh = [
