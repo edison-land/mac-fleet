@@ -55,6 +55,8 @@ bash c.sh --code tskey-auth-… alice@mm-us-01
 ssh alice@mm-us-01
 ```
 
+朋友暂时不用时：菜单栏 Tailscale 关掉开关（或 Quit），再打开就自动连上，不需要接入码。**不要点 Log out**：退出登录后要找管理员 `fleet user code <名字>` 重新生成接入码（换电脑同理）。彻底不用了就告诉管理员 `fleet user revoke <名字>`，并在后台 Machines 删掉他的设备。
+
 `curl` 报证书错误（`no alternative certificate subject name`）：国内网络下 GitHub 被干扰，打开代理后重试。
 
 ## 四、日常管理
