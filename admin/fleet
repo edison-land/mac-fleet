@@ -427,8 +427,11 @@ def cmd_user_revoke(a):
     acct = old_acct
     if input(f"\n同时删除 {', '.join(gone)} 上的账号 {acct} 及其文件？（不删就直接回车；删除输入 yes）：").strip() == "yes":
         for h in gone:
-            remote(h, f"[ \"$(id -gn {acct} 2>/dev/null)\" = fleetusers ] && sysadminctl -deleteUser {acct} && echo 已删除 {acct} "
+            del_cmd = (f"[ \"$(id -gn {acct} 2>/dev/null)\" = fleetusers ] && sysadminctl -deleteUser {acct} && echo 已删除 {acct} "
                       f"|| echo 跳过：{acct} 不存在或不是 fleet 建的")
+            if not remote(h, del_cmd):
+                print(f"{RED}[没删成] 连不上 {h}（管理员电脑要在自己的 Tailscale 网络里）。连上后重跑：{OFF}")
+                print(f"  ssh root@{h} 'sysadminctl -deleteUser {acct}'")
     else:
         print(f"账号 {acct} 保留在机器上（文件还在）")
 
