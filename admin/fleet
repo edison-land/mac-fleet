@@ -370,6 +370,7 @@ def client_message(u, acct, hs, key):
     print("以后连接：")
     for h in hs:
         print(f"ssh {acct}@{h}")
+    print("暂时不用：菜单栏 Tailscale 关掉开关，再打开即恢复。不要点 Log out（退出后要重新找我要接入码）")
 
 
 def cmd_user_add(a, grant_only=False):
